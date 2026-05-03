@@ -1,0 +1,130 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'mubaraktelecomltd@gmail.com' ||
+        request.auth.token.email == 'mubaraktelecomltd@mubaraktelecom.com' ||
+        (exists(/databases/$(database)/documents/settings/config) && request.auth.token.email == get(/databases/$(database)/documents/settings/config).data.adminEmail)
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Validations
+    function isValidUser(data) {
+      return data.keys().hasAll(['phoneNumber', 'displayName', 'username', 'email', 'nid', 'dob', 'balance', 'level', 'pin', 'createdAt'])
+        && data.phoneNumber is string && data.phoneNumber.size() <= 15
+        && data.displayName is string && data.displayName.size() <= 100
+        && data.username is string && data.username.size() <= 100
+        && data.email is string && data.email.size() <= 200
+        && data.nid is string && data.nid.size() <= 20
+        && data.dob is string && data.dob.size() <= 20
+        && data.balance is number
+        && data.pin is string && data.pin.size() == 4
+        && data.level in ['personal', 'retailer', 'dealer', 'dgm', 'house', 'sub-admin']
+        && (data.createdAt == request.time || data.createdAt is timestamp);
+    }
+
+    function isValidOffer(data) {
+      return data.keys().hasAll(['title', 'price', 'operator', 'type', 'isActive', 'createdAt'])
+        && data.title is string && data.title.size() <= 200
+        && data.price is number
+        && data.operator in ['GP', 'Robi', 'Banglalink', 'Teletalk', 'Airtel', 'Skitto', 'BL']
+        && data.type in ['drive', 'regular']
+        && data.isActive is bool
+        && (data.createdAt == request.time || data.createdAt is timestamp);
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['userId', 'amount', 'type', 'status', 'createdAt'])
+        && data.userId == request.auth.uid
+        && data.amount is number
+        && data.type in ['recharge', 'payment', 'add-balance', 'offer_purchase']
+        && data.status in ['pending', 'success', 'failed']
+        && data.createdAt == request.time;
+    }
+
+    // Collection Matches
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isAdmin() || (isSignedIn() && isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phoneNumber', 'pin', 'balance', 'username', 'email', 'nid', 'dob']) && isValidUser(incoming()));
+    }
+
+    match /offers/{offerId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /configs/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /balanceRequests/{requestId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, update, delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+    }
+
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (isAdmin() || isValidTransaction(incoming()));
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    match /chats/{chatId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || (isSignedIn() && incoming().userId == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /autoRecharges/{id} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (isAdmin() || incoming().userId == request.auth.uid);
+      allow update: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+    }
+
+    match /settings/{docId} {
+      allow get: if true;
+      allow list, write: if isAdmin();
+    }
+  }
+}

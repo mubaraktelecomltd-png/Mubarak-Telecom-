@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information and balance",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "nid": { "type": "string" },
+        "dob": { "type": "string" },
+        "balance": { "type": "number" },
+        "pin": { "type": "string" },
+        "level": { "type": "string", "enum": ["personal", "retailer", "dealer", "dgm", "house", "sub-admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "email", "phoneNumber", "balance", "level", "pin"]
+    },
+    "Offer": {
+      "title": "Telecom Offer",
+      "description": "Mobile data or talk time packages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "operator": { "type": "string", "enum": ["GP", "Robi", "Banglalink", "Teletalk", "Airtel", "Skitto"] },
+        "type": { "type": "string", "enum": ["drive", "regular"] },
+        "category": { "type": "string", "enum": ["minute", "internet", "bundle"] },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "price", "operator", "type", "category", "isActive"]
+    },
+    "AppConfig": {
+      "title": "App Configuration",
+      "description": "Global settings like payment numbers and login notifications",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string" },
+        "bkash": { "type": "string" },
+        "nagad": { "type": "string" },
+        "rocket": { "type": "string" },
+        "loginNotice": { "type": "string" },
+        "isRechargeEnabled": { "type": "boolean" }
+      }
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Broadcast notifications for all users",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "message", "createdAt"]
+    },
+    "AutoRecharge": {
+      "title": "Auto Recharge Setting",
+      "description": "User configuration for automatic recharges",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "targetNumber": { "type": "string" },
+        "amount": { "type": "number" },
+        "frequency": { "type": "string", "enum": ["threshold", "daily", "weekly", "monthly"] },
+        "threshold": { "type": "number" },
+        "operator": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastRun": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "targetNumber", "amount", "frequency", "isActive", "operator"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "offers/{offerId}": {
+      "schema": "Offer",
+      "description": "Available telecom offers"
+    },
+    "transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Logs"
+    },
+    "configs/global": {
+      "schema": "AppConfig",
+      "description": "Global app settings"
+    },
+    "notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "Broadcast notifications"
+    },
+    "autoRecharges/{id}": {
+      "schema": "AutoRecharge",
+      "description": "Automatic recharge settings"
+    }
+  }
+}
