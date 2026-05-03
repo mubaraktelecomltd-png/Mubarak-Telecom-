@@ -7,6 +7,17 @@ interface SystemSettings {
   adminEmail: string;
   primaryColor: string;
   logoUrl?: string;
+  isDualBalanceEnabled?: boolean;
+  whatsapp?: string;
+  telegram?: string;
+  youtube?: string;
+  shopping?: string;
+  mainBalanceCommission?: number;
+  levelSettings?: Record<string, {
+    mainCommission: number;
+    driveCommission: number;
+    registrationCost: number;
+  }>;
 }
 
 interface SystemContextType {

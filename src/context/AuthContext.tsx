@@ -8,7 +8,10 @@ interface UserProfile {
   uid: string;
   phoneNumber: string;
   displayName: string;
+  photoURL?: string;
   balance: number;
+  mainBalance?: number;
+  driveBalance?: number;
   level: string;
   pin: string;
   isAdmin: boolean;
@@ -37,7 +40,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const data = userDoc.data();
       setProfile({
         ...data,
-        isAdmin: currentUser.email === settings.adminEmail || currentUser.email === 'mubaraktelecomltd@mubaraktelecom.com'
+        isAdmin: currentUser.email === settings.adminEmail || currentUser.email === 'mubaraktelecomltd@gmail.com'
       } as UserProfile);
     } else {
       // Create default profile for new users
@@ -46,12 +49,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         phoneNumber: '',
         displayName: currentUser.displayName || 'User',
         balance: 0,
+        mainBalance: 0,
+        driveBalance: 0,
         level: 'user',
         pin: '', // Will be set in SetupModal
         createdAt: serverTimestamp(),
       };
       await setDoc(userDocRef, newProfile);
-      setProfile({ ...newProfile, isAdmin: currentUser.email === settings.adminEmail || currentUser.email === 'mubaraktelecomltd@mubaraktelecom.com' } as any);
+      setProfile({ ...newProfile, isAdmin: currentUser.email === settings.adminEmail || currentUser.email === 'mubaraktelecomltd@gmail.com' } as any);
     }
   };
 
@@ -79,7 +84,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const data = snapshot.data();
             setProfile({
               ...data,
-              isAdmin: currentUser.email === settings.adminEmail || currentUser.email === 'mubaraktelecomltd@mubaraktelecom.com'
+              isAdmin: currentUser.email === settings.adminEmail || currentUser.email === 'mubaraktelecomltd@gmail.com'
             } as UserProfile);
           } else {
             // Document doesn't exist, create it (legacy fallback from fetchProfile)
@@ -89,6 +94,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 phoneNumber: '',
                 displayName: currentUser.displayName || 'User',
                 balance: 0,
+                mainBalance: 0,
+                driveBalance: 0,
                 level: 'user',
                 pin: '',
                 createdAt: serverTimestamp(),

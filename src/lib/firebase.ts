@@ -5,7 +5,9 @@ import {
   signInWithPopup, 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword,
-  signOut as firebaseSignOut
+  signOut as firebaseSignOut,
+  updatePassword,
+  updateEmail
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -26,4 +28,4 @@ export const signInWithGoogle = async () => {
   }
 };
 
-export { createUserWithEmailAndPassword, signInWithEmailAndPassword, firebaseSignOut };
+export { createUserWithEmailAndPassword, signInWithEmailAndPassword, firebaseSignOut, updatePassword, updateEmail };

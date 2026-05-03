@@ -34,13 +34,14 @@ import {
   CheckCircle2,
   AlertCircle,
   Copy,
-  Check
+  Check,
+  Camera
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from './context/AuthContext';
 import { useSystem } from './context/SystemContext';
-import { auth, db, signInWithEmailAndPassword, createUserWithEmailAndPassword } from './lib/firebase';
-import { collection, addDoc, onSnapshot, query, orderBy, where, serverTimestamp, setDoc, doc, deleteDoc, getDoc } from 'firebase/firestore';
+import { auth, db, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithGoogle, updateEmail, updatePassword } from './lib/firebase';
+import { collection, addDoc, onSnapshot, query, orderBy, where, serverTimestamp, setDoc, doc, deleteDoc, getDoc, getDocs } from 'firebase/firestore';
 
 // --- Types ---
 enum OperationType {
@@ -166,6 +167,37 @@ const LoginScreen = ({ onSwitchToRegister }: { onSwitchToRegister: () => void })
           <button disabled={loading} type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/20 uppercase tracking-widest text-sm active:scale-95 transition-all mt-4 disabled:opacity-50">
             {loading ? 'Verifying...' : 'Access Portal'}
           </button>
+
+          <div className="relative flex items-center gap-4 py-2">
+            <div className="flex-1 h-px bg-slate-200"></div>
+            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">OR</span>
+            <div className="flex-1 h-px bg-slate-200"></div>
+          </div>
+
+          <button 
+            type="button"
+            onClick={async () => {
+              try {
+                setLoading(true);
+                await signInWithGoogle();
+              } catch (err: any) {
+                setError('Google Sign-in failed. Please try again.');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading}
+            className="w-full bg-white border-2 border-slate-100 text-slate-700 font-black py-4 rounded-[24px] shadow-sm flex items-center justify-center gap-3 active:scale-95 transition-all disabled:opacity-50"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            <span className="text-xs uppercase tracking-widest">Sign in with Google</span>
+          </button>
+
         </form>
 
         <button onClick={onSwitchToRegister} className="mt-8 text-slate-400 text-[11px] font-black hover:text-primary transition-colors block w-full text-center uppercase tracking-widest">
@@ -185,14 +217,7 @@ const RegistrationScreen = ({ onSwitchToLogin, onRegisterSuccess }: { onSwitchTo
   const [formData, setFormData] = useState({ displayName: '', username: '', email: '', phone: '', pin: '', nid: '', dob: '', level: 'personal' });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [levelConfigs, setLevelConfigs] = useState<any>({});
-
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'configs', 'levels'), (d) => {
-      if (d.exists()) setLevelConfigs(d.data());
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'configs/levels'));
-    return () => unsub();
-  }, []);
+  const levelSettings = settings.levelSettings || {};
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -221,6 +246,8 @@ const RegistrationScreen = ({ onSwitchToLogin, onRegisterSuccess }: { onSwitchTo
         level: formData.level,
         pin: formData.pin,
         balance: 0,
+        mainBalance: 0,
+        driveBalance: 0,
         createdAt: serverTimestamp()
       });
       onRegisterSuccess();
@@ -293,7 +320,7 @@ const RegistrationScreen = ({ onSwitchToLogin, onRegisterSuccess }: { onSwitchTo
                   className={`p-3 rounded-2xl text-[9px] font-black uppercase tracking-tighter border-2 transition-all flex flex-col items-center justify-center gap-1 ${formData.level === l.id ? 'border-primary bg-primary text-white shadow-lg shadow-primary/20' : 'border-white bg-white text-slate-400 shadow-sm'}`}
                 >
                   {l.name}
-                  <span className={`text-[8px] opacity-70 ${formData.level === l.id ? 'text-white' : 'text-slate-400'}`}>৳{levelConfigs[l.id]?.charge || 0}</span>
+                  <span className={`text-[8px] opacity-70 ${formData.level === l.id ? 'text-white' : 'text-slate-400'}`}>৳{levelSettings[l.id]?.registrationCost || 0}</span>
                 </button>
               ))}
             </div>
@@ -389,7 +416,7 @@ const Header = ({ profile, logoUrl }: { profile: any, logoUrl?: string }) => (
         </button>
         <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-white/30 shadow-md">
           <img 
-            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.uid || 'user'}`} 
+            src={profile?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.uid || 'user'}`} 
             alt="Profile" 
             className="w-full h-full object-cover bg-white/20"
             referrerPolicy="no-referrer"
@@ -400,8 +427,10 @@ const Header = ({ profile, logoUrl }: { profile: any, logoUrl?: string }) => (
   </header>
 );
 
-const BalanceCard = ({ profile, onAddBalance, runWithPin }: { profile: any, onAddBalance: () => void, runWithPin: (action: () => void) => void }) => {
-  const [showBalance, setShowBalance] = useState(false);
+const BalanceCard = ({ profile, onAddBalance, onSendMoney, onAddUser, onMyUsers, runWithPin }: { profile: any, onAddBalance: () => void, onSendMoney: () => void, onAddUser: () => void, onMyUsers: () => void, runWithPin: (action: () => void) => void }) => {
+  const [showMain, setShowMain] = useState(false);
+  const [showDrive, setShowDrive] = useState(false);
+  const { settings } = useSystem();
 
   return (
     <div className="px-5 -mt-14 relative z-20">
@@ -410,38 +439,57 @@ const BalanceCard = ({ profile, onAddBalance, runWithPin }: { profile: any, onAd
         animate={{ y: 0, opacity: 1 }}
         className="bg-white rounded-[32px] p-6 shadow-xl border border-slate-100"
       >
-        <div className="grid grid-cols-3 gap-2 items-center mb-6">
+        <div className="grid grid-cols-2 gap-4 items-center mb-6">
           <div className="space-y-0.5">
             <h2 className="text-secondary font-black text-sm uppercase tracking-tight">My account</h2>
             <p className="text-cyan-600 font-bold text-[11px] tracking-wide truncate">{profile?.phoneNumber || 'Setup Required'}</p>
           </div>
           
-          <div className="flex justify-center">
-            <motion.button 
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowBalance(!showBalance)}
-              className="flex items-center gap-1.5 bg-white border border-slate-200 py-1.5 px-3 rounded-full shadow-sm"
-            >
-              <div className="w-6 h-6 rounded-full bg-cyan-400 flex items-center justify-center text-white text-[10px] font-black">
-                ৳
-              </div>
-              <span className="text-[10px] font-black text-slate-700 whitespace-nowrap">
-                {showBalance ? `৳${(profile?.balance || 0).toLocaleString()}` : 'My Balance'}
-              </span>
-            </motion.button>
-          </div>
-
           <div className="text-right">
             <p className="text-[10px] text-slate-300 font-black uppercase tracking-widest leading-none mb-1">My Level</p>
-            <p className="text-[10px] font-black text-orange-400 capitalize">{profile?.level || 'user'}</p>
+            <p className="text-[11px] font-black text-orange-400 capitalize">{profile?.level || 'user'}</p>
           </div>
+        </div>
+
+        <div className={`grid ${settings.isDualBalanceEnabled ? 'grid-cols-2' : 'grid-cols-1'} gap-3 mb-8`}>
+          <motion.button 
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowMain(!showMain)}
+            className="flex items-center gap-2.5 bg-slate-50 border border-slate-100 py-3 px-4 rounded-2xl shadow-sm justify-center group relative overflow-hidden"
+          >
+            <div className="w-8 h-8 rounded-xl bg-cyan-500 flex items-center justify-center text-white text-sm font-black shadow-lg shadow-cyan-500/20">৳</div>
+            <div className="text-left">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block leading-none mb-1">Main Balance</span>
+              <span className="text-xs font-black text-slate-700 whitespace-nowrap">
+                {showMain ? `৳${(profile?.mainBalance ?? profile?.balance ?? 0).toLocaleString()}` : 'Tap for Balance'}
+              </span>
+            </div>
+            {showMain && <motion.div layoutId="main-active" className="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-500" />}
+          </motion.button>
+
+          {settings.isDualBalanceEnabled && (
+            <motion.button 
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowDrive(!showDrive)}
+              className="flex items-center gap-2.5 bg-slate-50 border border-slate-100 py-3 px-4 rounded-2xl shadow-sm justify-center group relative overflow-hidden"
+            >
+              <div className="w-8 h-8 rounded-xl bg-rose-500 flex items-center justify-center text-white text-sm font-black shadow-lg shadow-rose-500/20">৳</div>
+              <div className="text-left">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block leading-none mb-1">Drive Balance</span>
+                <span className="text-xs font-black text-slate-700 whitespace-nowrap">
+                  {showDrive ? `৳${(profile?.driveBalance ?? 0).toLocaleString()}` : 'Tap for Balance'}
+                </span>
+              </div>
+              {showDrive && <motion.div layoutId="drive-active" className="absolute bottom-0 left-0 right-0 h-0.5 bg-rose-500" />}
+            </motion.button>
+          )}
         </div>
 
         <div className="grid grid-cols-4 gap-4">
           <ServiceIcon label="Add Balance" icon={<Plus size={24} strokeWidth={3} />} colorClass="text-red-500" bgColorClass="bg-white border-2 border-slate-50" onClick={onAddBalance} />
-          <ServiceIcon label="Send Money" icon={<Send size={24} strokeWidth={3} />} colorClass="text-blue-500" bgColorClass="bg-white border-2 border-slate-50" onClick={() => {}} />
-          <ServiceIcon label="Add User" icon={<UserPlus size={24} strokeWidth={3} />} colorClass="text-orange-500" bgColorClass="bg-white border-2 border-slate-50" onClick={() => runWithPin(() => {})} />
-          <ServiceIcon label="My users" icon={<Users size={24} strokeWidth={3} />} colorClass="text-cyan-600" bgColorClass="bg-white border-2 border-slate-50" onClick={() => runWithPin(() => {})} />
+          <ServiceIcon label="Send Money" icon={<Send size={24} strokeWidth={3} />} colorClass="text-blue-500" bgColorClass="bg-white border-2 border-slate-50" onClick={onSendMoney} />
+          <ServiceIcon label="Add User" icon={<UserPlus size={24} strokeWidth={3} />} colorClass="text-orange-500" bgColorClass="bg-white border-2 border-slate-50" onClick={onAddUser} />
+          <ServiceIcon label="My users" icon={<Users size={24} strokeWidth={3} />} colorClass="text-cyan-600" bgColorClass="bg-white border-2 border-slate-50" onClick={onMyUsers} />
         </div>
       </motion.div>
     </div>
@@ -520,21 +568,10 @@ const ServiceIcon = ({ icon, label, colorClass, bgColorClass, onClick }: { icon:
   </motion.div>
 );
 
-const OfferList = ({ isAdmin, activeType, onTypeChange, onBuy, onEdit }: { isAdmin?: boolean, activeType: 'drive' | 'regular', onTypeChange: (type: 'drive' | 'regular') => void, onBuy: (offer: any) => void, onEdit?: (offer: any) => void }) => {
-  const [offers, setOffers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+const OfferList = ({ isAdmin, activeType, onTypeChange, onBuy, onEdit, offers, loading }: { isAdmin?: boolean, activeType: 'drive' | 'regular', onTypeChange: (type: 'drive' | 'regular') => void, onBuy: (offer: any) => void, onEdit?: (offer: any) => void, offers: any[], loading?: boolean }) => {
   const [activeOperator, setActiveOperator] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'price-low' | 'price-high' | 'title'>('newest');
-
-  useEffect(() => {
-    const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'offers'));
-    return () => unsubscribe();
-  }, []);
 
   const handleDelete = async (id: string) => {
     if (window.confirm('Delete this offer?')) {
@@ -543,8 +580,19 @@ const OfferList = ({ isAdmin, activeType, onTypeChange, onBuy, onEdit }: { isAdm
     }
   };
 
+  const toggleStatus = async (offer: any) => {
+    try {
+      await setDoc(doc(db, 'offers', offer.id), { isActive: !offer.isActive }, { merge: true });
+    } catch (error) { handleFirestoreError(error, OperationType.UPDATE, `offers/${offer.id}`); }
+  };
+
   const sortedAndFiltered = offers
-    .filter(o => o.type === activeType && (!activeOperator || o.operator === activeOperator) && (activeCategory === 'all' || o.category === activeCategory))
+    .filter(o => 
+      o.type === activeType && 
+      (isAdmin || o.isActive !== false) &&
+      (!activeOperator || o.operator === activeOperator) && 
+      (activeCategory === 'all' || o.category === activeCategory)
+    )
     .sort((a, b) => {
       const getNetPrice = (o: any) => (o.regularPrice || o.price || 0) - (o.commission || 0);
       switch (sortBy) {
@@ -631,14 +679,25 @@ const OfferList = ({ isAdmin, activeType, onTypeChange, onBuy, onEdit }: { isAdm
                   </div>
                   <div className="flex gap-2 mt-1">
                     {isAdmin && (
+                      <div className="flex flex-col gap-2 mr-2">
+                        <button 
+                          onClick={() => toggleStatus(offer)} 
+                          className={`text-[8px] font-black px-2 py-1 rounded-full uppercase tracking-widest transition-all ${offer.isActive !== false ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}
+                        >
+                          {offer.isActive !== false ? 'Active' : 'Deactive'}
+                        </button>
+                      </div>
+                    )}
+                    {isAdmin && (
                       <>
-                        <button onClick={() => onEdit?.(offer)} className="text-blue-400 hover:text-blue-600 transition-colors"><Plus size={16} className="rotate-45" /> Edit</button>
-                        <button onClick={() => handleDelete(offer.id)} className="text-red-400 hover:text-red-600 transition-colors"><X size={16} /></button>
+                        <button onClick={() => onEdit?.(offer)} className="text-blue-400 hover:text-blue-600 transition-colors flex items-center gap-1 text-[10px] font-bold"><Plus size={14} className="rotate-45" /> Edit</button>
+                        <button onClick={() => handleDelete(offer.id)} className="text-red-400 hover:text-red-600 transition-colors flex items-center gap-1 text-[10px] font-bold"><X size={14} /> Del</button>
                       </>
                     )}
                     <button 
                       onClick={() => onBuy({ ...offer, netPrice })}
-                      className="bg-primary text-white text-[10px] font-black px-5 py-2 rounded-full shadow-lg shadow-primary/20 uppercase tracking-widest active:scale-95 transition-transform"
+                      disabled={offer.isActive === false && !isAdmin}
+                      className="bg-primary text-white text-[10px] font-black px-5 py-2 rounded-full shadow-lg shadow-primary/20 uppercase tracking-widest active:scale-95 transition-transform disabled:opacity-50"
                     >
                       Buy
                     </button>
@@ -654,56 +713,150 @@ const OfferList = ({ isAdmin, activeType, onTypeChange, onBuy, onEdit }: { isAdm
 
 // --- Modals ---
 
-const AdminModal = ({ onClose, editingOffer }: { onClose: () => void, editingOffer?: any }) => {
+const AdminModal = ({ onClose, editingOffer, offers, setEditingOffer }: { onClose: () => void, editingOffer?: any, offers: any[], setEditingOffer: (o: any) => void }) => {
   const { settings, updateSettings } = useSystem();
-  const [tab, setTab] = useState<'offer' | 'settings'>(editingOffer ? 'offer' : 'offer'); // Can be used to switch
+  const [tab, setTab] = useState<'offer' | 'settings'>(editingOffer ? 'offer' : 'offer');
+  const [manageOperator, setManageOperator] = useState('GP');
+  const [selectedOfferIds, setSelectedOfferIds] = useState<string[]>([]);
   const [formData, setFormData] = useState({ 
-    title: editingOffer?.title || '', 
-    description: editingOffer?.description || '', 
-    regularPrice: editingOffer?.regularPrice || '', 
-    commission: editingOffer?.commission || '', 
-    operator: editingOffer?.operator || 'GP', 
-    type: editingOffer?.type || 'drive', 
-    category: editingOffer?.category || 'internet' 
+    title: '', 
+    description: '', 
+    regularPrice: '', 
+    commission: '', 
+    operator: 'GP', 
+    type: 'drive', 
+    category: 'internet',
+    isActive: true
   });
+
+  useEffect(() => {
+    if (editingOffer) {
+      setFormData({
+        title: editingOffer.title || '',
+        description: editingOffer.description || '',
+        regularPrice: (editingOffer.regularPrice || editingOffer.price || '').toString(),
+        commission: (editingOffer.commission || 0).toString(),
+        operator: editingOffer.operator || 'GP',
+        type: editingOffer.type || 'drive',
+        category: editingOffer.category || 'internet',
+        isActive: editingOffer.isActive ?? true
+      });
+    } else {
+      setFormData({
+        title: '',
+        description: '',
+        regularPrice: '',
+        commission: '',
+        operator: 'GP',
+        type: 'drive',
+        category: 'internet',
+        isActive: true
+      });
+    }
+  }, [editingOffer]);
 
   const [systemSettings, setSystemSettings] = useState({
     appName: settings.appName,
     adminEmail: settings.adminEmail,
+    adminPassword: '', // New field
     primaryColor: settings.primaryColor,
-    logoUrl: settings.logoUrl || ''
+    logoUrl: settings.logoUrl || '',
+    isDualBalanceEnabled: settings.isDualBalanceEnabled ?? false,
+    whatsapp: settings.whatsapp || '',
+    telegram: settings.telegram || '',
+    youtube: settings.youtube || '',
+    shopping: settings.shopping || '',
+    mainBalanceCommission: settings.mainBalanceCommission || 0
   });
+
+  const [levelSettings, setLevelSettings] = useState<Record<string, any>>(settings.levelSettings || {
+    personal: { mainCommission: 0, driveCommission: 0, registrationCost: 0 },
+    retailer: { mainCommission: 0, driveCommission: 0, registrationCost: 0 },
+    dealer: { mainCommission: 0, driveCommission: 0, registrationCost: 0 },
+    dgm: { mainCommission: 0, driveCommission: 0, registrationCost: 0 },
+    house: { mainCommission: 0, driveCommission: 0, registrationCost: 0 },
+    'sub-admin': { mainCommission: 0, driveCommission: 0, registrationCost: 0 }
+  });
+
+  const handleBulkStatus = async (active: boolean) => {
+    if (selectedOfferIds.length === 0) return;
+    try {
+      const batch = selectedOfferIds.map(id => setDoc(doc(db, 'offers', id), { isActive: active, updatedAt: serverTimestamp() }, { merge: true }));
+      await Promise.all(batch);
+      setSelectedOfferIds([]);
+      alert(`Updated ${selectedOfferIds.length} offers`);
+    } catch (error) { alert('Bulk update failed'); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const regPrice = parseFloat(formData.regularPrice);
+      if (isNaN(regPrice)) {
+        alert('Please enter a valid price');
+        return;
+      }
       const comm = parseFloat(formData.commission) || 0;
       const payload = { 
         ...formData, 
         regularPrice: regPrice, 
         commission: comm,
         price: regPrice - comm,
-        isActive: true, 
         updatedAt: serverTimestamp() 
       };
       
       if (editingOffer) {
         await setDoc(doc(db, 'offers', editingOffer.id), payload, { merge: true });
+        alert('Offer updated successfully!');
       } else {
         await addDoc(collection(db, 'offers'), { ...payload, createdAt: serverTimestamp() });
+        alert('Offer added successfully!');
       }
       onClose();
-    } catch (error) { handleFirestoreError(error, editingOffer ? OperationType.UPDATE : OperationType.CREATE, editingOffer ? `offers/${editingOffer.id}` : 'offers'); }
+    } catch (error: any) { 
+      alert('Failed to save offer: ' + error.message);
+      handleFirestoreError(error, editingOffer ? OperationType.UPDATE : OperationType.CREATE, editingOffer ? `offers/${editingOffer.id}` : 'offers'); 
+    }
   };
 
   const handleSettingsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await updateSettings(systemSettings);
-      alert('Settings updated successfully!');
-    } catch (error) {
-      alert('Failed to update settings');
+      // 1. Update Auth Email if changed
+      if (systemSettings.adminEmail !== settings.adminEmail && auth.currentUser) {
+        try {
+          await updateEmail(auth.currentUser, systemSettings.adminEmail);
+        } catch (err: any) {
+          if (err.code === 'auth/requires-recent-login') {
+            alert('Re-authentication required. Please logout and login again to change email.');
+            return;
+          }
+          throw err;
+        }
+      }
+
+      // 2. Update Auth Password if provided
+      if (systemSettings.adminPassword && auth.currentUser) {
+        try {
+          await updatePassword(auth.currentUser, systemSettings.adminPassword);
+        } catch (err: any) {
+          if (err.code === 'auth/requires-recent-login') {
+            alert('Re-authentication required. Please logout and login again to change password.');
+            return;
+          }
+          throw err;
+        }
+      }
+
+      // 3. Update Firestore settings
+      const { adminPassword, ...settingsToSave } = systemSettings;
+      await updateSettings({ ...settingsToSave, levelSettings });
+      
+      setSystemSettings({ ...systemSettings, adminPassword: '' });
+      alert('Admin credentials and system settings updated successfully!');
+    } catch (error: any) {
+      console.error(error);
+      alert('Failed to update settings: ' + error.message);
     }
   };
 
@@ -722,41 +875,107 @@ const AdminModal = ({ onClose, editingOffer }: { onClose: () => void, editingOff
         </div>
 
         {tab === 'offer' ? (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <input required placeholder="Offer Title (e.g. 100GB)" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary transition-all font-bold text-sm" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
-            <div className="grid grid-cols-2 gap-4">
-              <select className="px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={formData.operator} onChange={e => setFormData({...formData, operator: e.target.value})}>
-                {operators.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
-              </select>
-              <select className="px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
-                <option value="drive">Drive</option>
-                <option value="regular">Regular</option>
-              </select>
-            </div>
-            <select className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
-              <option value="internet">ইন্টারনেট (Internet)</option>
-              <option value="minute">মিনিট (Minute)</option>
-              <option value="bundle">ব্যান্ডেল (Bundle)</option>
-            </select>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-50 p-2 rounded-2xl">
-                <label className="text-[9px] font-black text-slate-400 uppercase ml-3 mb-1 block">Regular Price</label>
-                <input required type="number" placeholder="৳" className="w-full px-3 py-2 bg-transparent outline-none font-black text-primary text-xl" value={formData.regularPrice} onChange={e => setFormData({...formData, regularPrice: e.target.value})} />
+          <>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <input required placeholder="Offer Title (e.g. 100GB)" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary transition-all font-bold text-sm" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
+              <div className="grid grid-cols-2 gap-4">
+                <select className="px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={formData.operator} onChange={e => setFormData({...formData, operator: e.target.value})}>
+                  {operators.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
+                </select>
+                <select className="px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
+                  <option value="drive">Drive</option>
+                  <option value="regular">Regular</option>
+                </select>
               </div>
-              <div className="bg-emerald-50 p-2 rounded-2xl">
-                <label className="text-[9px] font-black text-emerald-400 uppercase ml-3 mb-1 block">Commission</label>
-                <input required type="number" placeholder="৳" className="w-full px-3 py-2 bg-transparent outline-none font-black text-emerald-600 text-xl" value={formData.commission} onChange={e => setFormData({...formData, commission: e.target.value})} />
+              <select className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                <option value="internet">ইন্টারনেট (Internet)</option>
+                <option value="minute">মিনিট (Minute)</option>
+                <option value="bundle">ব্যান্ডেল (Bundle)</option>
+              </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-2 rounded-2xl">
+                  <label className="text-[9px] font-black text-slate-400 uppercase ml-3 mb-1 block">Regular Price</label>
+                  <input required type="number" placeholder="৳" className="w-full px-3 py-2 bg-transparent outline-none font-black text-primary text-xl" value={formData.regularPrice} onChange={e => setFormData({...formData, regularPrice: e.target.value})} />
+                </div>
+                <div className="bg-emerald-50 p-2 rounded-2xl">
+                  <label className="text-[9px] font-black text-emerald-400 uppercase ml-3 mb-1 block">Commission</label>
+                  <input required type="number" placeholder="৳" className="w-full px-3 py-2 bg-transparent outline-none font-black text-emerald-600 text-xl" value={formData.commission} onChange={e => setFormData({...formData, commission: e.target.value})} />
+                </div>
+              </div>
+              <div className="p-4 bg-slate-900 rounded-3xl flex justify-between items-center text-white">
+                <span className="text-[10px] font-black uppercase tracking-widest opacity-50">Offer Net Price:</span>
+                <span className="text-2xl font-black">৳{(parseFloat(formData.regularPrice) || 0) - (parseFloat(formData.commission) || 0)}</span>
+              </div>
+              <textarea placeholder="Details..." className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+              
+              <div className="flex items-center justify-between px-2 bg-slate-50 p-4 rounded-3xl">
+                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Offer Status</span>
+                <button 
+                  type="button"
+                  onClick={() => setFormData({...formData, isActive: !formData.isActive})}
+                  className={`w-14 h-7 rounded-full relative transition-all duration-300 ${formData.isActive ? 'bg-primary' : 'bg-slate-200'}`}
+                >
+                  <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all shadow-md ${formData.isActive ? 'right-1' : 'left-1'}`} />
+                </button>
+              </div>
+
+              <button type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/30 uppercase tracking-widest active:scale-95 transition-all">
+                {editingOffer ? 'Update Offer' : 'Publish Live'}
+              </button>
+            </form>
+            
+            <div className="mt-10 space-y-4 pt-10 border-t border-slate-50">
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between px-2">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Live Assets</h3>
+                  <select 
+                    className="bg-slate-50 border border-slate-100 rounded-lg px-3 py-1 text-[10px] font-black uppercase text-primary outline-none"
+                    value={manageOperator} 
+                    onChange={e => setManageOperator(e.target.value)}
+                  >
+                    {operators.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
+                  </select>
+                </div>
+                
+                <div className="flex gap-2">
+                  <button onClick={() => handleBulkStatus(true)} className="flex-1 bg-emerald-50 text-emerald-600 text-[8px] font-black py-2 rounded-xl border border-emerald-100 uppercase tracking-widest">Activate All</button>
+                  <button onClick={() => handleBulkStatus(false)} className="flex-1 bg-rose-50 text-rose-600 text-[8px] font-black py-2 rounded-xl border border-rose-100 uppercase tracking-widest">Offline All</button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {offers.filter(o => o.operator === manageOperator).map(o => (
+                  <div key={o.id} className={`bg-slate-50 p-4 rounded-2xl flex items-center justify-between border transition-all ${selectedOfferIds.includes(o.id) ? 'border-primary bg-primary/5' : 'border-slate-100'}`}>
+                    <div className="flex items-center gap-3 flex-1">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedOfferIds.includes(o.id)} 
+                        onChange={() => setSelectedOfferIds(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id])}
+                        className="w-4 h-4 rounded border-slate-200 text-primary focus:ring-primary"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-800 line-clamp-1">{o.title}</span>
+                          <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${o.isActive !== false ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                            {o.isActive !== false ? 'Active' : 'Offline'}
+                          </span>
+                        </div>
+                        <p className="text-[9px] font-bold text-slate-400">৳{o.regularPrice || o.price} | Com: ৳{o.commission || 0}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => { setEditingOffer(o); setTab('offer'); }} className="p-2 text-slate-400 hover:text-blue-500 transition-colors">
+                      <Plus size={14} className="rotate-45" />
+                    </button>
+                  </div>
+                ))}
+                {offers.filter(o => o.operator === manageOperator).length === 0 && (
+                  <div className="text-center py-6">
+                    <p className="text-[10px] font-bold text-slate-300 uppercase tracking-widest italic">No existing offers for {manageOperator}</p>
+                  </div>
+                )}
               </div>
             </div>
-            <div className="p-4 bg-slate-900 rounded-3xl flex justify-between items-center text-white">
-              <span className="text-[10px] font-black uppercase tracking-widest opacity-50">Offer Net Price:</span>
-              <span className="text-2xl font-black">৳{(parseFloat(formData.regularPrice) || 0) - (parseFloat(formData.commission) || 0)}</span>
-            </div>
-            <textarea placeholder="Details..." className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
-            <button type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/30 uppercase tracking-widest active:scale-95 transition-all">
-              {editingOffer ? 'Update Offer' : 'Publish Live'}
-            </button>
-          </form>
+          </>
         ) : (
           <form onSubmit={handleSettingsSubmit} className="space-y-4">
             <div>
@@ -766,6 +985,10 @@ const AdminModal = ({ onClose, editingOffer }: { onClose: () => void, editingOff
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Admin Email</label>
               <input required type="email" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={systemSettings.adminEmail} onChange={e => setSystemSettings({...systemSettings, adminEmail: e.target.value})} />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">New Password (Optional)</label>
+              <input type="password" placeholder="Leave blank to keep current" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={systemSettings.adminPassword} onChange={e => setSystemSettings({...systemSettings, adminPassword: e.target.value})} />
             </div>
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Theme Color (Hex)</label>
@@ -778,9 +1001,155 @@ const AdminModal = ({ onClose, editingOffer }: { onClose: () => void, editingOff
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Logo URL</label>
               <input required className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={systemSettings.logoUrl} onChange={e => setSystemSettings({...systemSettings, logoUrl: e.target.value})} />
             </div>
+            <div className="flex items-center justify-between px-2 bg-slate-50 p-4 rounded-3xl">
+              <div>
+                <span className="text-xs font-black text-slate-800 uppercase tracking-widest block">Dual Balance System</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Enable Main & Drive balances</span>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setSystemSettings({...systemSettings, isDualBalanceEnabled: !systemSettings.isDualBalanceEnabled})}
+                className={`w-14 h-7 rounded-full relative transition-all duration-300 ${systemSettings.isDualBalanceEnabled ? 'bg-primary' : 'bg-slate-200'}`}
+              >
+                <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all shadow-md ${systemSettings.isDualBalanceEnabled ? 'right-1' : 'left-1'}`} />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-3xl space-y-4">
+              <span className="text-xs font-black text-slate-800 uppercase tracking-widest block px-1">Social Links</span>
+              <input placeholder="WhatsApp URL" className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold" value={systemSettings.whatsapp} onChange={e => setSystemSettings({...systemSettings, whatsapp: e.target.value})} />
+              <input placeholder="Telegram URL" className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold" value={systemSettings.telegram} onChange={e => setSystemSettings({...systemSettings, telegram: e.target.value})} />
+              <input placeholder="YouTube URL" className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold" value={systemSettings.youtube} onChange={e => setSystemSettings({...systemSettings, youtube: e.target.value})} />
+              <input placeholder="Shopping URL" className="w-full px-4 py-3 rounded-xl border border-slate-200 text-xs font-bold" value={systemSettings.shopping} onChange={e => setSystemSettings({...systemSettings, shopping: e.target.value})} />
+            </div>
+
+            <div className="bg-emerald-50 p-4 rounded-3xl">
+              <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest block mb-2 px-1">Global Main Balance Commission (%)</label>
+              <input type="number" step="0.01" className="w-full px-5 py-4 rounded-2xl border-2 border-emerald-100 outline-none focus:border-primary font-black text-emerald-700 bg-white" value={systemSettings.mainBalanceCommission} onChange={e => setSystemSettings({...systemSettings, mainBalanceCommission: parseFloat(e.target.value) || 0})} />
+              <p className="text-[8px] font-bold text-emerald-600/60 mt-2 px-1">Used if level commission is 0</p>
+            </div>
+            
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest px-1">Level Management</h3>
+              {Object.entries(levelSettings).map(([level, config]: [string, any]) => (
+                <div key={level} className="bg-slate-50 p-5 rounded-3xl space-y-4 border border-slate-100">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[10px] font-black text-primary uppercase tracking-widest">{level}</span>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase">Configuration</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[8px] font-black text-slate-400 uppercase block mb-1">Main Com %</label>
+                      <input 
+                        type="number" 
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-black" 
+                        value={config.mainCommission} 
+                        onChange={e => setLevelSettings({...levelSettings, [level]: {...config, mainCommission: parseFloat(e.target.value) || 0}})} 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[8px] font-black text-slate-400 uppercase block mb-1">Drive Com %</label>
+                      <input 
+                        type="number" 
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-black" 
+                        value={config.driveCommission} 
+                        onChange={e => setLevelSettings({...levelSettings, [level]: {...config, driveCommission: parseFloat(e.target.value) || 0}})} 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[8px] font-black text-slate-400 uppercase block mb-1">Cost (৳)</label>
+                      <input 
+                        type="number" 
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-black" 
+                        value={config.registrationCost} 
+                        onChange={e => setLevelSettings({...levelSettings, [level]: {...config, registrationCost: parseFloat(e.target.value) || 0}})} 
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             <button type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/30 uppercase tracking-widest active:scale-95 transition-all mt-4">Save Changes</button>
           </form>
         )}
+      </motion.div>
+    </div>
+  );
+};
+
+const BillPaymentModal = ({ type, label, onClose }: { type: string, label: string, onClose: () => void }) => {
+  const { user, profile } = useAuth();
+  const [formData, setFormData] = useState({ number: '', amount: '', note: '' });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !profile) return;
+    const amount = parseFloat(formData.amount);
+    const currentMainBalance = profile.mainBalance ?? profile.balance ?? 0;
+    
+    if (currentMainBalance < amount) {
+      alert('Insufficient balance!');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await setDoc(doc(db, 'users', user.uid), { 
+        mainBalance: currentMainBalance - amount,
+        balance: currentMainBalance - amount 
+      }, { merge: true });
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        userName: profile.displayName,
+        userPhone: profile.phoneNumber,
+        type: 'bill_payment',
+        balanceType: 'mainBalance',
+        serviceType: type,
+        serviceLabel: label,
+        targetNumber: formData.number,
+        amount: amount,
+        note: formData.note,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+      alert(`${label} request submitted successfully!`);
+      onClose();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'transactions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[40px] w-full max-w-sm p-8 shadow-2xl relative">
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} /></button>
+        <h2 className="text-xl font-black mb-1 uppercase tracking-tight text-slate-800">{label}</h2>
+        <p className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-widest">Premium Payment Service</p>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Account / Phone No</label>
+            <input required placeholder="Enter details..." className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={formData.number} onChange={e => setFormData({...formData, number: e.target.value})} />
+          </div>
+          <div className="text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Amount</label>
+            <div className="relative">
+               <span className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 font-bold">৳</span>
+               <input required type="number" placeholder="0.00" className="w-full pl-10 pr-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-black text-lg text-primary" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
+            </div>
+          </div>
+          <div className="text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Reference / Note (Optional)</label>
+            <input placeholder="Personal / Bill ID" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} />
+          </div>
+          <button disabled={loading} type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/30 uppercase tracking-widest active:scale-95 transition-all mt-2 disabled:opacity-50">
+            {loading ? 'Processing...' : `Submit ${label}`}
+          </button>
+        </form>
       </motion.div>
     </div>
   );
@@ -844,6 +1213,63 @@ const PurchaseModal = ({ offer, balance, onClose, onConfirm }: { offer: any, bal
   );
 };
 
+const TransactionHistoryModal = ({ onClose }: { onClose: () => void }) => {
+  const { user } = useAuth();
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'transactions'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (s) => {
+      setLogs(s.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'transactions'));
+    return unsub;
+  }, [user]);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[40px] w-full max-w-md p-8 shadow-2xl relative h-[70vh] flex flex-col">
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} /></button>
+        <h2 className="text-xl font-black mb-1 uppercase tracking-tight text-slate-800">History</h2>
+        <p className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-widest">My Transaction Records</p>
+        
+        <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-none">
+          {loading ? (
+            <div className="flex justify-center py-10"><motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full" /></div>
+          ) : logs.length === 0 ? (
+            <div className="text-center py-20">
+               <History size={48} className="mx-auto text-slate-100 mb-4" />
+               <p className="text-xs font-bold text-slate-300 uppercase tracking-widest italic">No history found</p>
+            </div>
+          ) : logs.map(log => (
+            <div key={log.id} className="bg-slate-50 p-5 rounded-3xl border border-slate-100 flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-800">{log.offerTitle || log.serviceLabel || (log.operator ? `${log.operator} Recharge` : 'Transaction')}</h4>
+                <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{log.targetNumber || 'System'}</p>
+                <p className="text-[8px] font-bold text-slate-300 mt-1 uppercase tracking-tighter">
+                  {log.createdAt?.toDate().toLocaleString()}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-sm font-black text-primary block">৳{log.amount}</span>
+                <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest inline-block mt-1 ${
+                  log.status === 'success' ? 'bg-emerald-100 text-emerald-600' :
+                  log.status === 'failed' ? 'bg-rose-100 text-rose-600' :
+                  'bg-amber-100 text-amber-600'
+                }`}>
+                  {log.status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 const MobileRechargeModal = ({ onClose }: { onClose: () => void }) => {
   const { user, profile } = useAuth();
   const [formData, setFormData] = useState({ number: '', amount: '', operator: 'GP', type: 'Prepaid' });
@@ -853,21 +1279,27 @@ const MobileRechargeModal = ({ onClose }: { onClose: () => void }) => {
     e.preventDefault();
     if (!user || !profile) return;
     const amount = parseFloat(formData.amount);
+    const currentMainBalance = profile.mainBalance ?? profile.balance ?? 0;
     
-    if (profile.balance < amount) {
+    if (currentMainBalance < amount) {
       alert('Insufficient balance!');
       return;
     }
 
     setLoading(true);
     try {
-      await addDoc(collection(db, 'orders'), {
+      await setDoc(doc(db, 'users', user.uid), { 
+        mainBalance: currentMainBalance - amount,
+        balance: currentMainBalance - amount 
+      }, { merge: true });
+      await addDoc(collection(db, 'transactions'), {
         userId: user.uid,
         userName: profile.displayName,
         userPhone: profile.phoneNumber,
         type: 'recharge',
+        balanceType: 'mainBalance',
         operator: formData.operator,
-        recipientNumber: formData.number,
+        targetNumber: formData.number,
         amount: amount,
         rechargeType: formData.type,
         status: 'pending',
@@ -876,7 +1308,7 @@ const MobileRechargeModal = ({ onClose }: { onClose: () => void }) => {
       alert('Recharge request submitted successfully!');
       onClose();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'orders');
+      handleFirestoreError(error, OperationType.CREATE, 'transactions');
     } finally {
       setLoading(false);
     }
@@ -995,11 +1427,89 @@ const ChatModal = ({ user, onClose }: { user: any, onClose: () => void }) => {
   );
 };
 
-const UserManagementModal = ({ onClose }: { onClose: () => void }) => {
+const SendMoneyModal = ({ onClose }: { onClose: () => void }) => {
+  const { user, profile } = useAuth();
+  const [formData, setFormData] = useState({ targetNumber: '', amount: '', pin: '' });
+  const [loading, setLoading] = useState(false);
+
+  const handleTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !profile) return;
+    if (formData.pin !== profile.pin) return alert('Invalid PIN');
+    
+    const amount = parseFloat(formData.amount);
+    const balanceKey = 'mainBalance';
+    const currentBalance = profile[balanceKey] ?? profile.balance ?? 0;
+
+    if (currentBalance < amount) return alert('Insufficient Balance');
+
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'users'), where('phoneNumber', '==', formData.targetNumber));
+      const s = await getDocs(q);
+      if (s.empty) throw new Error('Recipient not found');
+      const recipient = { id: s.docs[0].id, ...s.docs[0].data() as any };
+
+      const senderUpdates: any = { [balanceKey]: currentBalance - amount };
+      if (balanceKey === 'mainBalance') senderUpdates.balance = currentBalance - amount;
+      await setDoc(doc(db, 'users', user.uid), senderUpdates, { merge: true });
+
+      const recBalance = recipient[balanceKey] ?? recipient.balance ?? 0;
+      const recUpdates: any = { [balanceKey]: recBalance + amount };
+      if (balanceKey === 'mainBalance') recUpdates.balance = recBalance + amount;
+      await setDoc(doc(db, 'users', recipient.id), recUpdates, { merge: true });
+
+      await addDoc(collection(db, 'transactions'), {
+        userId: user.uid,
+        type: 'send-money',
+        amount,
+        recipient: formData.targetNumber,
+        status: 'success',
+        createdAt: serverTimestamp()
+      });
+
+      alert('Money Transferred Successfully!');
+      onClose();
+    } catch (err: any) { alert(err.message); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+      <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[40px] w-full max-w-md p-8 shadow-2xl relative">
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={20} /></button>
+        <h2 className="text-xl font-black mb-1 uppercase tracking-tight text-slate-800">Send Money</h2>
+        <p className="text-[10px] font-bold text-slate-400 mb-8 uppercase tracking-widest">Main Balance Transfer</p>
+
+        <form onSubmit={handleTransfer} className="space-y-6">
+          <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Recipient Number</label>
+            <input required placeholder="017XXXXXXXX" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={formData.targetNumber} onChange={e => setFormData({...formData, targetNumber: e.target.value})} />
+          </div>
+          <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Amount (৳)</label>
+            <input required type="number" placeholder="500" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-black text-primary text-xl" value={formData.amount} onChange={e => setFormData({...formData, amount: e.target.value})} />
+          </div>
+          <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Your PIN</label>
+            <input required type="password" maxLength={4} placeholder="••••" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-black tracking-[1em] text-center" value={formData.pin} onChange={e => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} />
+          </div>
+          <button disabled={loading} type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/30 uppercase tracking-widest active:scale-95 transition-all disabled:opacity-50">
+            {loading ? 'Processing...' : 'Transfer Now'}
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+};
+
+const UserManagementModal = ({ onClose, defaultTab = 'list' }: { onClose: () => void, defaultTab?: 'list' | 'add' }) => {
   const [users, setUsers] = useState<any[]>([]);
+  const [tab, setTab] = useState(defaultTab);
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<any>(null);
-  const [editFormData, setEditFormData] = useState({ displayName: '', phoneNumber: '', balance: '', level: 'user', pin: '' });
+  const [editFormData, setEditFormData] = useState({ displayName: '', phoneNumber: '', balance: '', mainBalance: '', driveBalance: '', level: 'user', pin: '' });
+  const [addFormData, setAddFormData] = useState({ username: '', phoneNumber: '', displayName: '', pin: '', level: 'retailer' });
+  const { settings } = useSystem();
 
   useEffect(() => {
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
@@ -1014,9 +1524,39 @@ const UserManagementModal = ({ onClose }: { onClose: () => void }) => {
     e.preventDefault();
     if (!editingUser) return;
     try {
-      await setDoc(doc(db, 'users', editingUser.id), { ...editFormData, balance: parseFloat(editFormData.balance.toString()) }, { merge: true });
+      const mb = parseFloat(editFormData.mainBalance.toString()) || 0;
+      const db_val = parseFloat(editFormData.driveBalance.toString()) || 0;
+      
+      await setDoc(doc(db, 'users', editingUser.id), { 
+        ...editFormData, 
+        mainBalance: mb,
+        driveBalance: db_val,
+        balance: mb 
+      }, { merge: true });
       setEditingUser(null);
     } catch (error) { handleFirestoreError(error, OperationType.UPDATE, `users/${editingUser.id}`); }
+  };
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const q = query(collection(db, 'users'), where('phoneNumber', '==', addFormData.phoneNumber));
+      const s = await getDocs(q);
+      if (!s.empty) throw new Error('Phone number already registered');
+
+      await addDoc(collection(db, 'users'), {
+        ...addFormData,
+        username: addFormData.username || addFormData.phoneNumber,
+        uid: '', 
+        balance: 0,
+        mainBalance: 0,
+        driveBalance: 0,
+        isAdmin: false,
+        createdAt: serverTimestamp()
+      });
+      alert('User added to records. Note: User must still register with this phone number to access account.');
+      setTab('list');
+    } catch (err: any) { alert(err.message); }
   };
 
   return (
@@ -1025,6 +1565,11 @@ const UserManagementModal = ({ onClose }: { onClose: () => void }) => {
         <div className="flex justify-between items-center mb-8">
           <h2 className="text-xl font-black uppercase tracking-tight">Admin | User Manager</h2>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
+        </div>
+
+        <div className="flex gap-4 mb-6 bg-slate-50 p-1.5 rounded-2xl">
+          <button onClick={() => { setTab('list'); setEditingUser(null); }} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${tab === 'list' ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}>User List</button>
+          <button onClick={() => { setTab('add'); setEditingUser(null); }} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${tab === 'add' ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}>Add User</button>
         </div>
 
         {editingUser ? (
@@ -1039,10 +1584,16 @@ const UserManagementModal = ({ onClose }: { onClose: () => void }) => {
                 <input className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold" value={editFormData.phoneNumber} onChange={e => setEditFormData({...editFormData, phoneNumber: e.target.value})} />
               </div>
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Balance</label>
-                <input type="number" className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-black text-primary" value={editFormData.balance} onChange={e => setEditFormData({...editFormData, balance: e.target.value})} />
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Main Balance</label>
+                <input type="number" className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-black text-primary" value={editFormData.mainBalance} onChange={e => setEditFormData({...editFormData, mainBalance: e.target.value})} />
               </div>
             </div>
+            {settings.isDualBalanceEnabled && (
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Drive Balance</label>
+                <input type="number" className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-black text-rose-500" value={editFormData.driveBalance} onChange={e => setEditFormData({...editFormData, driveBalance: e.target.value})} />
+              </div>
+            )}
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Reset PIN (4 Digits)</label>
               <input className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-black tracking-[1em] text-center" maxLength={4} value={editFormData.pin} onChange={e => setEditFormData({...editFormData, pin: e.target.value.replace(/\D/g, '')})} />
@@ -1061,6 +1612,34 @@ const UserManagementModal = ({ onClose }: { onClose: () => void }) => {
               <button type="submit" className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black tracking-widest shadow-lg shadow-primary/20">SAVE</button>
             </div>
           </form>
+        ) : tab === 'add' ? (
+          <form onSubmit={handleAddUser} className="flex-1 overflow-y-auto space-y-6 pr-1 scrollbar-none">
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block text-primary">Display Name</label>
+              <input required placeholder="Full Name" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm" value={addFormData.displayName} onChange={e => setAddFormData({...addFormData, displayName: e.target.value})} />
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Phone Number</label>
+              <input required placeholder="017XXXXXXXX" className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold text-sm tracking-wide" value={addFormData.phoneNumber} onChange={e => setAddFormData({...addFormData, phoneNumber: e.target.value})} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Set PIN</label>
+                <input required placeholder="4 Digits" maxLength={4} className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-black tracking-widest text-center" value={addFormData.pin} onChange={e => setAddFormData({...addFormData, pin: e.target.value.replace(/\D/g, '')})} />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Level</label>
+                <select className="w-full px-5 py-4 rounded-2xl border-2 border-slate-50 outline-none focus:border-primary font-bold appearance-none bg-slate-50 text-xs" value={addFormData.level} onChange={e => setAddFormData({...addFormData, level: e.target.value})}>
+                  <option value="retailer">Retailer</option>
+                  <option value="dealer">Dealer</option>
+                  <option value="reseller">Reseller</option>
+                  <option value="sub-admin">Sub-Admin</option>
+                </select>
+              </div>
+            </div>
+            <button type="submit" className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-xl shadow-primary/30 uppercase tracking-widest active:scale-95 transition-all mt-4">Create Account</button>
+            <p className="text-[9px] font-medium text-slate-400 text-center uppercase tracking-tighter px-4">After creation, user should register with this phone number to access.</p>
+          </form>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-none">
             {loading ? <p className="text-center py-10 opacity-30 text-xs font-black uppercase">Scanning Network...</p> : users.map(user => (
@@ -1070,10 +1649,11 @@ const UserManagementModal = ({ onClose }: { onClose: () => void }) => {
                   <p className="text-[10px] text-cyan-500 font-black mt-0.5">{user.phoneNumber || 'NO PHONE'}</p>
                   <div className="flex gap-2 mt-2">
                     <span className="text-[9px] font-black bg-white border border-slate-200 px-1.5 py-0.5 rounded text-orange-500 uppercase tracking-widest">{user.level || 'user'}</span>
-                    <span className="text-xs font-black text-primary">৳{user.balance || 0}</span>
+                    <span className="text-xs font-black text-primary">Main: ৳{user.mainBalance ?? user.balance ?? 0}</span>
+                    {settings.isDualBalanceEnabled && <span className="text-xs font-black text-rose-500">Drive: ৳{user.driveBalance ?? 0}</span>}
                   </div>
                 </div>
-                <button onClick={() => { setEditingUser(user); setEditFormData({ displayName: user.displayName, phoneNumber: user.phoneNumber, balance: user.balance?.toString(), level: user.level, pin: user.pin }); }} className="bg-white shadow-sm border border-slate-100 px-4 py-2.5 rounded-xl text-[10px] font-black text-primary uppercase">Manage</button>
+                <button onClick={() => { setEditingUser(user); setEditFormData({ displayName: user.displayName, phoneNumber: user.phoneNumber, balance: user.balance?.toString(), mainBalance: (user.mainBalance ?? user.balance ?? 0).toString(), driveBalance: (user.driveBalance ?? 0).toString(), level: user.level, pin: user.pin }); }} className="bg-white shadow-sm border border-slate-100 px-4 py-2.5 rounded-xl text-[10px] font-black text-primary uppercase">Manage</button>
               </div>
             ))}
           </div>
@@ -1154,7 +1734,7 @@ const PaymentConfigModal = ({ onClose }: { onClose: () => void }) => {
 };
 
 const DesignConfigModal = ({ onClose }: { onClose: () => void }) => {
-  const [data, setData] = useState({ logoUrl: '', banners: [] as string[] });
+  const [data, setData] = useState({ logoUrl: '', banners: [] as string[], whatsapp: '', telegram: '', youtube: '', shopping: '' });
   const [newBanner, setNewBanner] = useState('');
   
   useEffect(() => {
@@ -1173,17 +1753,33 @@ const DesignConfigModal = ({ onClose }: { onClose: () => void }) => {
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
       <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white rounded-[40px] w-full max-w-md p-8 shadow-2xl relative h-[85vh] flex flex-col">
         <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
-        <h2 className="text-xl font-black mb-8 uppercase tracking-tight">Branding & Banners</h2>
+        <h2 className="text-xl font-black mb-8 uppercase tracking-tight">Social & Branding</h2>
         
         <div className="flex-1 overflow-y-auto space-y-8 scrollbar-none pr-1 pb-6">
-          <div>
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Company Logo URL</label>
-            <input className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold text-xs" value={data.logoUrl} onChange={e => setData({...data, logoUrl: e.target.value})} />
-            {data.logoUrl && (
-              <div className="mt-4 bg-slate-50 p-4 rounded-2xl flex items-center justify-center">
-                 <img src={data.logoUrl} className="max-h-12 object-contain" alt="Logo Preview" />
+          <div className="space-y-4">
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Company Assets</h3>
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Logo URL</label>
+              <input className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold text-xs" value={data.logoUrl} onChange={e => setData({...data, logoUrl: e.target.value})} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">WhatsApp Number</label>
+                <input placeholder="88017..." className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold text-xs" value={data.whatsapp} onChange={e => setData({...data, whatsapp: e.target.value})} />
               </div>
-            )}
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Telegram Link</label>
+                <input placeholder="https://t.me/..." className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold text-xs" value={data.telegram} onChange={e => setData({...data, telegram: e.target.value})} />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">YouTube Channel</label>
+                <input placeholder="https://youtube.com/..." className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold text-xs" value={data.youtube} onChange={e => setData({...data, youtube: e.target.value})} />
+              </div>
+              <div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Shopping Site</label>
+                <input placeholder="https://..." className="w-full px-5 py-4 border-2 border-slate-50 rounded-2xl font-bold text-xs" value={data.shopping} onChange={e => setData({...data, shopping: e.target.value})} />
+              </div>
+            </div>
           </div>
 
           <div className="border-t pt-8">
@@ -1216,7 +1812,7 @@ const DesignConfigModal = ({ onClose }: { onClose: () => void }) => {
         </div>
 
         <div className="pt-6 border-t">
-          <button onClick={handleSave} className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-2xl active:scale-95 transition-all uppercase tracking-widest">Update Design System</button>
+          <button onClick={handleSave} className="w-full bg-primary text-white font-black py-5 rounded-[24px] shadow-2xl active:scale-95 transition-all uppercase tracking-widest">Update Cloud Assets</button>
         </div>
       </motion.div>
     </div>
@@ -1515,40 +2111,172 @@ const PinVerifyModal = ({ userPin, onSuccess, onClose }: { userPin: string, onSu
   );
 };
 
-const ProfileModal = ({ profile, onClose }: { profile: any, onClose: () => void }) => (
-  <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
-    <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white rounded-[40px] w-full max-w-sm p-8 shadow-2xl relative">
-      <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
-      <div className="text-center space-y-6">
-        <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-slate-50 mx-auto shadow-lg">
-          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.uid}`} alt="Avatar" className="w-full h-full object-cover" />
-        </div>
-        <div>
-          <h2 className="text-2xl font-black text-slate-800">{profile?.displayName}</h2>
-          <p className="text-sm font-bold text-primary uppercase tracking-widest">{profile?.level}</p>
-        </div>
-        <div className="bg-slate-50 p-6 rounded-3xl space-y-4 text-left">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] font-black text-slate-400 uppercase">Phone</span>
-            <span className="font-bold text-slate-700">{profile?.phoneNumber}</span>
+const ProfileModal = ({ profile, onClose }: { profile: any, onClose: () => void }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState({ 
+    displayName: profile?.displayName || '', 
+    photoURL: profile?.photoURL || '' 
+  });
+  const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.uid) return;
+    setLoading(true);
+    try {
+      await setDoc(doc(db, 'users', profile.uid), formData, { merge: true });
+      setIsEditing(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${profile.uid}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 800000) {
+      alert('ছবিটি অনেক বড়। দয়া করে ৮০০ কেবি এর নিচের ছবি দিন (Image too large, keep under 800KB).');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setFormData(prev => ({ ...prev, photoURL: event.target?.result as string }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
+      <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white rounded-[40px] w-full max-w-sm p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
+        
+        <div className="text-center space-y-6">
+          <div className="relative w-24 h-24 mx-auto">
+            <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-slate-50 shadow-lg relative group">
+              <img 
+                src={formData.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile?.uid}`} 
+                alt="Avatar" 
+                className="w-full h-full object-cover" 
+                referrerPolicy="no-referrer"
+              />
+              {isEditing && (
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Camera className="text-white" size={24} />
+                </button>
+              )}
+            </div>
+            {isEditing && (
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute -bottom-1 -right-1 bg-primary text-white p-2 rounded-full shadow-lg border-2 border-white active:scale-90 transition-all"
+              >
+                <Camera size={14} />
+              </button>
+            )}
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept="image/*" 
+              onChange={handleImageUpload} 
+            />
           </div>
-          <div className="flex justify-between items-center border-t border-slate-200 pt-4">
-            <span className="text-[10px] font-black text-slate-400 uppercase">Balance</span>
-            <span className="font-black text-emerald-500">৳{profile?.balance?.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between items-center border-t border-slate-200 pt-4">
-            <span className="text-[10px] font-black text-slate-400 uppercase">Joined</span>
-            <span className="font-bold text-slate-500">{profile?.createdAt?.toDate().toLocaleDateString()}</span>
-          </div>
+
+          {isEditing ? (
+            <form onSubmit={handleUpdate} className="space-y-4 text-left">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Full Name</label>
+                <input 
+                  required 
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold" 
+                  value={formData.displayName} 
+                  onChange={e => setFormData({...formData, displayName: e.target.value})} 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-1 block">Photo URL (Optional)</label>
+                <input 
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-bold" 
+                  placeholder="https://example.com/photo.jpg"
+                  value={formData.photoURL.startsWith('data:') ? 'Image uploaded from device' : formData.photoURL} 
+                  onChange={e => setFormData({...formData, photoURL: e.target.value})} 
+                  disabled={formData.photoURL.startsWith('data:')}
+                />
+                {formData.photoURL.startsWith('data:') && (
+                  <button 
+                    type="button" 
+                    onClick={() => setFormData({...formData, photoURL: ''})}
+                    className="text-[8px] font-black text-red-500 uppercase mt-1 ml-1"
+                  >
+                    Clear uploaded image
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => setIsEditing(false)} 
+                  className="flex-1 py-3 text-slate-400 font-black text-[10px] uppercase"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="flex-1 bg-primary text-white py-3 rounded-xl font-black text-[10px] uppercase shadow-lg shadow-primary/20"
+                >
+                  {loading ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <div>
+                <h2 className="text-2xl font-black text-slate-800">{profile?.displayName}</h2>
+                <p className="text-sm font-bold text-primary uppercase tracking-widest">{profile?.level}</p>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-3xl space-y-4 text-left">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-400 uppercase">Phone</span>
+                  <span className="font-bold text-slate-700">{profile?.phoneNumber}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-slate-200 pt-4">
+                  <span className="text-[10px] font-black text-slate-400 uppercase">Balance</span>
+                  <span className="font-black text-emerald-500">৳{profile?.balance?.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={() => setIsEditing(true)}
+                  className="w-full bg-slate-100 text-slate-600 font-black py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-all text-sm uppercase"
+                >
+                  Edit Profile
+                </button>
+                <button 
+                  onClick={() => auth.signOut()} 
+                  className="w-full bg-red-50 text-red-500 font-black py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-all text-sm uppercase"
+                >
+                  <LogOut size={18} />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
-        <button onClick={() => auth.signOut()} className="w-full bg-red-50 text-red-500 font-black py-4 rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all">
-          <LogOut size={20} />
-          <span>SIGN OUT</span>
-        </button>
-      </div>
-    </motion.div>
-  </div>
-);
+      </motion.div>
+    </div>
+  );
+};
 
 const ChangePinModal = ({ profile, onClose }: { profile: any, onClose: () => void }) => {
   const [formData, setFormData] = useState({ oldPin: '', newPin: '', confirmPin: '' });
@@ -1624,7 +2352,7 @@ const OrderManagementModal = ({ onClose }: { onClose: () => void }) => {
   const [cancelReason, setCancelReason] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    const q = query(collection(db, 'transactions'), where('type', '==', 'offer_purchase'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'transactions'), where('type', 'in', ['offer_purchase', 'bill_payment', 'recharge']), orderBy('createdAt', 'desc'));
     const unsubOrders = onSnapshot(q, (s) => {
       setOrders(s.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
@@ -1682,7 +2410,7 @@ const OrderManagementModal = ({ onClose }: { onClose: () => void }) => {
             <div key={order.id} className="bg-slate-50 p-6 rounded-3xl border border-slate-100 space-y-4">
               <div className="flex justify-between items-start">
                 <div>
-                  <h4 className="text-sm font-black text-slate-800">{order.offerTitle}</h4>
+                  <h4 className="text-sm font-black text-slate-800">{order.offerTitle || order.serviceLabel || (order.operator ? `${order.operator} Recharge` : 'Payment')}</h4>
                   <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">Recipient: <span className="text-primary text-xs font-black">{order.targetNumber || 'N/A'}</span></p>
                   <p className="text-[10px] font-bold text-slate-400">User: {users[order.userId]?.displayName || 'Unknown'}</p>
                 </div>
@@ -1744,6 +2472,7 @@ const BalanceRequestsModal = ({ onClose }: { onClose: () => void }) => {
   const [requests, setRequests] = useState<any[]>([]);
   const [users, setUsers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const { settings } = useSystem();
 
   useEffect(() => {
     const unsubReq = onSnapshot(query(collection(db, 'balanceRequests'), orderBy('createdAt', 'desc')), (s) => {
@@ -1763,24 +2492,43 @@ const BalanceRequestsModal = ({ onClose }: { onClose: () => void }) => {
     if (!userProfile) return alert('User not found');
     
     try {
-      // 1. Update user balance
-      const newBalance = (userProfile.balance || 0) + req.amount;
-      await setDoc(doc(db, 'users', req.userId), { balance: newBalance }, { merge: true });
+      const balanceType = req.balanceType || 'mainBalance';
+      const level = userProfile.level || 'personal';
+      const levelConfig = settings.levelSettings?.[level];
       
-      // 2. Update request status
+      let commissionRate = 0;
+      if (balanceType === 'mainBalance') {
+        commissionRate = levelConfig?.mainCommission ?? (settings.mainBalanceCommission || 0);
+      } else if (balanceType === 'driveBalance') {
+        commissionRate = levelConfig?.driveCommission ?? 0;
+      }
+
+      const commissionAmount = (req.amount * commissionRate) / 100;
+      const totalToAdd = req.amount + commissionAmount;
+
+      const currentBalance = userProfile[balanceType] ?? (balanceType === 'mainBalance' ? userProfile.balance : 0) ?? 0;
+      const newBalanceValue = currentBalance + totalToAdd;
+      
+      const updates: any = { [balanceType]: newBalanceValue };
+      if (balanceType === 'mainBalance') updates.balance = newBalanceValue;
+
+      await setDoc(doc(db, 'users', req.userId), updates, { merge: true });
+      
       await setDoc(doc(db, 'balanceRequests', req.id), { status: 'success', approvedAt: serverTimestamp() }, { merge: true });
       
-      // 3. Log transaction
       await addDoc(collection(db, 'transactions'), {
         userId: req.userId,
         type: 'add-balance',
+        balanceType: balanceType,
         amount: req.amount,
+        commission: commissionAmount,
+        totalAdded: totalToAdd,
         method: req.method,
         status: 'success',
         createdAt: serverTimestamp()
       });
       
-      alert('Balance approved and added!');
+      alert(`Approved! Added ৳${req.amount} + ৳${commissionAmount} commission.`);
     } catch (error) { handleFirestoreError(error, OperationType.UPDATE, 'balanceRequests'); }
   };
 
@@ -1809,7 +2557,9 @@ const BalanceRequestsModal = ({ onClose }: { onClose: () => void }) => {
                   </div>
                   <div>
                     <p className="text-sm font-black text-slate-800">{users[req.userId]?.displayName || 'Unknown'}</p>
-                    <p className="text-[10px] font-bold text-slate-400 capitalize">{req.method} • {req.trxId}</p>
+                    <p className="text-[10px] font-bold text-slate-400 capitalize">
+                      {req.method} • {req.trxId} • <span className="text-primary">{req.balanceType === 'driveBalance' ? 'DRIVE' : 'MAIN'}</span>
+                    </p>
                   </div>
                 </div>
                 <p className="text-lg font-black text-primary">৳{req.amount}</p>
@@ -1843,9 +2593,10 @@ const BalanceRequestsModal = ({ onClose }: { onClose: () => void }) => {
 
 const AddBalanceModal = ({ onClose }: { onClose: () => void }) => {
   const [config, setConfig] = useState<any>(null);
-  const [formData, setFormData] = useState({ amount: '', method: 'bkash', trxId: '' });
+  const [formData, setFormData] = useState({ amount: '', method: 'bkash', trxId: '', balanceType: 'mainBalance' });
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success'>('idle');
   const [copied, setCopied] = useState(false);
+  const { settings } = useSystem();
 
   useEffect(() => {
     getDoc(doc(db, 'configs', 'global')).then(s => s.exists() && setConfig(s.data()));
@@ -1899,6 +2650,24 @@ const AddBalanceModal = ({ onClose }: { onClose: () => void }) => {
             <h2 className="text-xl font-black text-slate-800 mb-6 uppercase tracking-tight">Add Balance</h2>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+              {settings.isDualBalanceEnabled && (
+                <div className="flex gap-2 p-1.5 bg-slate-50 rounded-2xl">
+                  {[
+                    { id: 'mainBalance', name: 'Main Balance' },
+                    { id: 'driveBalance', name: 'Drive Balance' }
+                  ].map(bt => (
+                    <button 
+                      key={bt.id} 
+                      type="button" 
+                      onClick={() => setFormData({...formData, balanceType: bt.id})} 
+                      className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${formData.balanceType === bt.id ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}
+                    >
+                      {bt.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="flex gap-2 p-1.5 bg-slate-50 rounded-2xl">
                 {['bkash', 'nagad', 'rocket'].map(m => (
                   <button key={m} type="button" onClick={() => setFormData({...formData, method: m})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase transition-all ${formData.method === m ? 'bg-white shadow-sm text-primary' : 'text-slate-400'}`}>{m}</button>
@@ -1953,12 +2722,12 @@ const AddBalanceModal = ({ onClose }: { onClose: () => void }) => {
   );
 };
 
-const BottomNav = () => (
-  <nav className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white/90 backdrop-blur-xl border-t border-slate-50 py-5 px-10 flex justify-between items-center z-40 rounded-t-[40px] shadow-2xl">
+const BottomNav = ({ onLogsOpen }: { onLogsOpen: () => void }) => (
+  <nav className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white/90 backdrop-blur-xl border-t border-slate-50 py-5 px-10 flex justify-between items-center z-40 rounded-t-[40px] shadow-2xl text-slate-300">
     <button className="flex flex-col items-center gap-1.5 text-primary"><Home size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">Home</span></button>
-    <button className="flex flex-col items-center gap-1.5 text-slate-300"><Monitor size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">Offers</span></button>
-    <button className="flex flex-col items-center gap-1.5 text-slate-300"><History size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">Logs</span></button>
-    <button className="flex flex-col items-center gap-1.5 text-slate-300"><Menu size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">More</span></button>
+    <button className="flex flex-col items-center gap-1.5 hover:text-primary transition-colors"><Monitor size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">Offers</span></button>
+    <button onClick={onLogsOpen} className="flex flex-col items-center gap-1.5 hover:text-primary transition-colors"><History size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">Logs</span></button>
+    <button className="flex flex-col items-center gap-1.5 hover:text-primary transition-colors"><Menu size={24} strokeWidth={2.5} /><span className="text-[10px] font-black uppercase tracking-tighter">More</span></button>
   </nav>
 );
 
@@ -1970,6 +2739,8 @@ export default function App() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isUserManagerOpen, setIsUserManagerOpen] = useState(false);
+  const [isUserAddOpen, setIsUserAddOpen] = useState(false);
+  const [isSendMoneyOpen, setIsSendMoneyOpen] = useState(false);
   const [isOrderMgmtOpen, setIsOrderMgmtOpen] = useState(false);
   const [isAddBalanceOpen, setIsAddBalanceOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
@@ -1985,22 +2756,36 @@ export default function App() {
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<any>(null);
   const [pinChallenge, setPinChallenge] = useState<{ action: () => void } | null>(null);
   const [isMobileRechargeOpen, setIsMobileRechargeOpen] = useState(false);
   const [activeOfferType, setActiveOfferType] = useState<'drive' | 'regular'>('drive');
   const offerListRef = useRef<HTMLDivElement>(null);
   const [globalNotice, setGlobalNotice] = useState<string | null>(null);
-  const [logoUrl, setLogoUrl] = useState<string | undefined>();
-  const [banners, setBanners] = useState<string[]>([]);
+  const [config, setConfig] = useState<any>(null);
+  const [billType, setBillType] = useState<{ type: string, label: string } | null>(null);
+  const [offers, setOffers] = useState<any[]>([]);
+  const [loadingOffers, setLoadingOffers] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, 'offers'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setOffers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setLoadingOffers(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'offers');
+      setLoadingOffers(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'configs', 'global'), (s) => {
       if (s.exists()) {
         const d = s.data();
         setGlobalNotice(d.notice || d.loginNotice || null);
-        setLogoUrl(d.logoUrl);
-        setBanners(d.banners || []);
+        setConfig(d);
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, 'configs/global'));
     return unsub;
@@ -2040,9 +2825,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen max-w-lg mx-auto bg-[#F8FAFC] pb-36 font-sans selection:bg-primary selection:text-white overflow-x-hidden">
-      <Header profile={profile} logoUrl={logoUrl} />
+      <Header profile={profile} logoUrl={config?.logoUrl} />
       <DateTimePrayerSection />
-      <BalanceCard profile={profile} onAddBalance={() => setIsAddBalanceOpen(true)} runWithPin={runWithPin} />
+      <BalanceCard 
+        profile={profile} 
+        onAddBalance={() => setIsAddBalanceOpen(true)} 
+        onSendMoney={() => setIsSendMoneyOpen(true)}
+        onAddUser={() => setIsUserAddOpen(true)}
+        onMyUsers={() => setIsUserManagerOpen(true)}
+        runWithPin={runWithPin} 
+      />
       
       {globalNotice && (
         <div className="px-6 mb-6">
@@ -2067,23 +2859,25 @@ export default function App() {
         <ServiceIcon label="Auto Task" icon={<Repeat size={24} strokeWidth={3} />} colorClass="text-emerald-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setIsAutoRechargeOpen(true)} />
         <ServiceIcon label="Drive Offer" icon={<Zap size={24} strokeWidth={3} />} colorClass="text-rose-500" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => scrollToOffers('drive')} />
         <ServiceIcon label="Regular Offer" icon={<Gift size={24} strokeWidth={3} />} colorClass="text-orange-500" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => scrollToOffers('regular')} />
-        <ServiceIcon label="History" icon={<History size={24} strokeWidth={3} />} colorClass="text-purple-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => {}} />
-        <ServiceIcon label="Pay Bill" icon={<Wallet size={24} strokeWidth={3} />} colorClass="text-amber-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('Utility Bill Pay service coming soon!')} />
-        <ServiceIcon label="Banking" icon={<Home size={24} strokeWidth={3} />} colorClass="text-sky-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('Banking portal under development.')} />
-        <ServiceIcon label="Bkash (P)" icon={<CreditCard size={24} strokeWidth={3} />} colorClass="text-pink-500" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('Bkash Payment service coming soon!')} />
-        <ServiceIcon label="Nagad (P)" icon={<CreditCard size={24} strokeWidth={3} />} colorClass="text-orange-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('Nagad Payment service coming soon!')} />
-        <ServiceIcon label="Rocket (P)" icon={<CreditCard size={24} strokeWidth={3} />} colorClass="text-purple-700" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('Rocket Payment service coming soon!')} />
-        <ServiceIcon label="Cellfin" icon={<Smartphone size={24} strokeWidth={3} />} colorClass="text-blue-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('IBBL Cellfin service coming soon!')} />
-        <ServiceIcon label="mCash" icon={<Wallet size={24} strokeWidth={3} />} colorClass="text-teal-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('mCash service coming soon!')} />
-        <ServiceIcon label="SureCash" icon={<CheckCircle2 size={24} strokeWidth={3} />} colorClass="text-cyan-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => alert('SureCash service coming soon!')} />
+        <ServiceIcon label="History" icon={<History size={24} strokeWidth={3} />} colorClass="text-purple-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setIsLogsOpen(true)} />
+        <ServiceIcon label="Pay Bill" icon={<Wallet size={24} strokeWidth={3} />} colorClass="text-amber-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'utility', label: 'Utility Bill Pay' })} />
+        <ServiceIcon label="Banking" icon={<Home size={24} strokeWidth={3} />} colorClass="text-sky-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'banking', label: 'Bank Transfer' })} />
+        <ServiceIcon label="Bkash (P)" icon={<CreditCard size={24} strokeWidth={3} />} colorClass="text-pink-500" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'bkash', label: 'Bkash Payment' })} />
+        <ServiceIcon label="Nagad (P)" icon={<CreditCard size={24} strokeWidth={3} />} colorClass="text-orange-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'nagad', label: 'Nagad Payment' })} />
+        <ServiceIcon label="Rocket (P)" icon={<CreditCard size={24} strokeWidth={3} />} colorClass="text-purple-700" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'rocket', label: 'Rocket Payment' })} />
+        <ServiceIcon label="Cellfin" icon={<Smartphone size={24} strokeWidth={3} />} colorClass="text-blue-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'cellfin', label: 'Cellfin Service' })} />
+        <ServiceIcon label="mCash" icon={<Wallet size={24} strokeWidth={3} />} colorClass="text-teal-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'mcash', label: 'mCash Service' })} />
+        <ServiceIcon label="SureCash" icon={<CheckCircle2 size={24} strokeWidth={3} />} colorClass="text-cyan-600" bgColorClass="bg-white border-2 border-slate-50 shadow-sm" onClick={() => setBillType({ type: 'surecash', label: 'SureCash Service' })} />
       </ServiceSection>
 
-      <Banner banners={banners} />
+      <Banner banners={config?.banners || []} />
       <div ref={offerListRef}>
         <OfferList 
           activeType={activeOfferType}
           onTypeChange={setActiveOfferType}
           isAdmin={profile?.isAdmin} 
+          offers={offers}
+          loading={loadingOffers}
           onBuy={(offer) => runWithPin(() => setSelectedOffer(offer))} 
           onEdit={(offer) => {
             setEditingOffer(offer);
@@ -2108,19 +2902,21 @@ export default function App() {
       )}
 
       <ServiceSection title="Link & Service">
-        <ServiceIcon label="WhatsApp" icon={<MessageCircle strokeWidth={3} />} colorClass="text-green-500" bgColorClass="bg-white border border-slate-100" />
+        <ServiceIcon label="WhatsApp" icon={<MessageCircle strokeWidth={3} />} colorClass="text-green-500" bgColorClass="bg-white border border-slate-100" onClick={() => settings.whatsapp && window.open(`https://wa.me/${settings.whatsapp.replace(/\+/g, '')}`, '_blank')} />
         <ServiceIcon label="Live Chat" icon={<MessageSquare strokeWidth={3} />} colorClass="text-indigo-500" bgColorClass="bg-white border border-slate-100" onClick={() => setIsChatOpen(true)} />
-        <ServiceIcon label="Telegram" icon={<Telegram strokeWidth={3} />} colorClass="text-sky-500" bgColorClass="bg-white border border-slate-100" />
-        <ServiceIcon label="YouTube" icon={<Youtube strokeWidth={3} />} colorClass="text-red-500" bgColorClass="bg-white border border-slate-100" />
-        <ServiceIcon label="Shopping" icon={<ShoppingCart strokeWidth={3} />} colorClass="text-red-500" bgColorClass="bg-white border border-slate-100" />
+        <ServiceIcon label="Telegram" icon={<Telegram strokeWidth={3} />} colorClass="text-sky-500" bgColorClass="bg-white border border-slate-100" onClick={() => settings.telegram && window.open(settings.telegram, '_blank')} />
+        <ServiceIcon label="YouTube" icon={<Youtube strokeWidth={3} />} colorClass="text-red-500" bgColorClass="bg-white border border-slate-100" onClick={() => settings.youtube && window.open(settings.youtube, '_blank')} />
+        <ServiceIcon label="Shopping" icon={<ShoppingCart strokeWidth={3} />} colorClass="text-red-500" bgColorClass="bg-white border border-slate-100" onClick={() => settings.shopping && window.open(settings.shopping, '_blank')} />
         <ServiceIcon label="Password" icon={<Lock strokeWidth={3} />} colorClass="text-indigo-500" bgColorClass="bg-white border border-slate-100" onClick={() => setIsPasswordModalOpen(true)} />
         <ServiceIcon label="PIN" icon={<ShieldCheck strokeWidth={3} />} colorClass="text-amber-500" bgColorClass="bg-white border border-slate-100" onClick={() => setIsPinModalOpen(true)} />
         <ServiceIcon label="Profile" icon={<UserIcon strokeWidth={3} />} colorClass="text-blue-500" bgColorClass="bg-white border border-slate-100" onClick={() => setIsProfileModalOpen(true)} />
       </ServiceSection>
 
-      <BottomNav />
+      <BottomNav onLogsOpen={() => setIsLogsOpen(true)} />
 
       {isUserManagerOpen && <UserManagementModal onClose={() => setIsUserManagerOpen(false)} />}
+      {isUserAddOpen && <UserManagementModal defaultTab="add" onClose={() => setIsUserAddOpen(false)} />}
+      {isSendMoneyOpen && <SendMoneyModal onClose={() => setIsSendMoneyOpen(false)} />}
       {isOrderMgmtOpen && <OrderManagementModal onClose={() => setIsOrderMgmtOpen(false)} />}
       {isBalanceRequestOpen && <BalanceRequestsModal onClose={() => setIsBalanceRequestOpen(false)} />}
       {isAddBalanceOpen && <AddBalanceModal onClose={() => setIsAddBalanceOpen(false)} />}
@@ -2131,6 +2927,8 @@ export default function App() {
             setEditingOffer(null);
           }} 
           editingOffer={editingOffer}
+          offers={offers}
+          setEditingOffer={setEditingOffer}
         />
       )}
       {isBrandingOpen && <DesignConfigModal onClose={() => setIsBrandingOpen(false)} />}
@@ -2144,20 +2942,36 @@ export default function App() {
       {isMobileRechargeOpen && <MobileRechargeModal onClose={() => setIsMobileRechargeOpen(false)} />}
       {isProfileModalOpen && <ProfileModal profile={profile} onClose={() => setIsProfileModalOpen(false)} />}
       {isChatOpen && <ChatModal user={profile} onClose={() => setIsChatOpen(false)} />}
+      {isLogsOpen && <TransactionHistoryModal onClose={() => setIsLogsOpen(false)} />}
+      {billType && <BillPaymentModal type={billType.type} label={billType.label} onClose={() => setBillType(null)} />}
 
       {selectedOffer && (
         <PurchaseModal 
           offer={selectedOffer} 
-          balance={profile?.balance || 0}
+          balance={
+            settings.isDualBalanceEnabled 
+              ? (selectedOffer.type === 'drive' ? (profile?.driveBalance || 0) : (profile?.mainBalance ?? profile?.balance ?? 0))
+              : (profile?.mainBalance ?? profile?.balance ?? 0)
+          }
           onClose={() => setSelectedOffer(null)} 
           onConfirm={async (number) => {
             const netPrice = selectedOffer.netPrice || selectedOffer.price;
-            if ((profile?.balance || 0) < netPrice) {
+            const isDrive = selectedOffer.type === 'drive';
+            const balanceKey = (settings.isDualBalanceEnabled && isDrive) ? 'driveBalance' : 'mainBalance';
+            const currentBalance = (balanceKey === 'driveBalance') 
+              ? (profile?.driveBalance || 0) 
+              : (profile?.mainBalance ?? profile?.balance ?? 0);
+
+            if (currentBalance < netPrice) {
               alert('Insufficient Balance!');
               return;
             }
             try {
-              await setDoc(doc(db, 'users', profile.uid), { balance: profile.balance - netPrice }, { merge: true });
+              const updates: any = { [balanceKey]: currentBalance - netPrice };
+              // Keep legacy balance in sync if updating mainBalance
+              if (balanceKey === 'mainBalance') updates.balance = currentBalance - netPrice;
+              
+              await setDoc(doc(db, 'users', profile.uid), updates, { merge: true });
               await addDoc(collection(db, 'transactions'), {
                 userId: profile.uid,
                 type: 'offer_purchase',
@@ -2165,6 +2979,7 @@ export default function App() {
                 offerTitle: selectedOffer.title,
                 targetNumber: number,
                 amount: netPrice,
+                balanceType: balanceKey,
                 regularPrice: selectedOffer.regularPrice || selectedOffer.price,
                 commission: selectedOffer.commission || 0,
                 status: 'pending',

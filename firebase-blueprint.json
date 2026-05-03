@@ -8,11 +8,14 @@
         "uid": { "type": "string" },
         "username": { "type": "string" },
         "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
         "email": { "type": "string" },
         "phoneNumber": { "type": "string" },
         "nid": { "type": "string" },
         "dob": { "type": "string" },
         "balance": { "type": "number" },
+        "mainBalance": { "type": "number" },
+        "driveBalance": { "type": "number" },
         "pin": { "type": "string" },
         "level": { "type": "string", "enum": ["personal", "retailer", "dealer", "dgm", "house", "sub-admin"] },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -47,7 +50,25 @@
         "nagad": { "type": "string" },
         "rocket": { "type": "string" },
         "loginNotice": { "type": "string" },
-        "isRechargeEnabled": { "type": "boolean" }
+        "whatsapp": { "type": "string" },
+        "telegram": { "type": "string" },
+        "youtube": { "type": "string" },
+        "shopping": { "type": "string" },
+        "isRechargeEnabled": { "type": "boolean" },
+        "isDualBalanceEnabled": { "type": "boolean" },
+        "mainBalanceCommission": { "type": "number", "description": "Percentage commission for main balance adds" },
+        "levelSettings": {
+          "type": "object",
+          "description": "JSON object mapping level IDs to commission and cost settings",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "mainCommission": { "type": "number" },
+              "driveCommission": { "type": "number" },
+              "registrationCost": { "type": "number" }
+            }
+          }
+        }
       }
     },
     "Notification": {

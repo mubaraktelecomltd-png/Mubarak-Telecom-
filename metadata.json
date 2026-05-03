@@ -1,6 +1,6 @@
 {
   "name": "Mubarak Telecom",
   "description": "A comprehensive telecom service app for mobile recharges, bill payments, and account management with a polished, mobile-first interface.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": []
 }
